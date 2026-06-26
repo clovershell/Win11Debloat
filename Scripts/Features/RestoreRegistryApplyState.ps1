@@ -7,38 +7,21 @@
         $ArgumentObject = $null
     )
 
-    $hiveDatPath = if ($Target -eq 'DefaultUserProfile') {
-        GetUserDirectory -userName 'Default' -fileName 'NTUSER.DAT'
+    $targetUserName = if ($Target -eq 'DefaultUserProfile') {
+        'Default'
     }
     elseif ($Target -like 'User:*') {
         $userName = $Target.Substring(5)
         if ([string]::IsNullOrWhiteSpace($userName)) {
-            throw '用户还原的备份目标格式无效。'
+            throw '用户恢复的备份目标格式无效。'
         }
-        GetUserDirectory -userName $userName -fileName 'NTUSER.DAT'
+        $userName
     }
     else {
         throw "不支持的备份目标 '$Target'。"
     }
 
-    $global:LASTEXITCODE = 0
-    reg load 'HKU\Default' "$hiveDatPath" | Out-Null
-    $loadExitCode = $LASTEXITCODE
-    if ($loadExitCode -ne 0) {
-        throw "无法加载目标用户配置单元 '$hiveDatPath'（退出代码：$loadExitCode）。"
-    }
-
-    try {
-        & $ScriptBlock $ArgumentObject
-    }
-    finally {
-        $global:LASTEXITCODE = 0
-        reg unload 'HKU\Default' | Out-Null
-        $unloadExitCode = $LASTEXITCODE
-        if ($unloadExitCode -ne 0) {
-            throw "卸载注册表配置单元 'HKU\Default' 失败（退出代码：$unloadExitCode）"
-        }
-    }
+    Invoke-WithTargetUserHive -TargetUserName $targetUserName -ScriptBlock $ScriptBlock -ArgumentObject $ArgumentObject
 }
 
 function Restore-RegistryKeySnapshot {
@@ -49,17 +32,17 @@ function Restore-RegistryKeySnapshot {
 
     $registryParts = Split-RegistryPath -path $Snapshot.Path
     if (-not $registryParts) {
-        throw "备份中的注册表路径不受支持：$($Snapshot.Path)"
+        throw "备份中不支持的注册表路径：$($Snapshot.Path)"
     }
 
     $rootKey = Get-RegistryRootKey -hiveName $registryParts.Hive
     if (-not $rootKey) {
-        throw "备份中的注册表配置单元不受支持：$($registryParts.Hive)"
+        throw "备份中不支持的注册表配置单元：$($registryParts.Hive)"
     }
 
     $subKeyPath = $registryParts.SubKey
     if ([string]::IsNullOrWhiteSpace($subKeyPath)) {
-        throw "备份中的根级注册表路径不受支持：$($Snapshot.Path)"
+        throw "备份中不支持的根级注册表路径：$($Snapshot.Path)"
     }
 
     if (-not $Snapshot.Exists) {
@@ -74,7 +57,7 @@ function Restore-RegistryKeySnapshot {
 
     $key = $rootKey.CreateSubKey($subKeyPath)
     if ($null -eq $key) {
-        throw "无法创建或打开注册表项 '$($Snapshot.Path)'"
+        throw "无法创建或打开注册表键 '$($Snapshot.Path)'"
     }
 
     try {
@@ -106,7 +89,7 @@ function Restore-RegistryValueSnapshot {
             $RegistryKey.DeleteValue($valueName, $false)
         }
         catch {
-            throw "在 '$($RegistryKey.Name)' 中删除注册表值 '$valueName' 失败：$($_.Exception.Message)"
+            throw "删除注册表值 '$valueName'（位于 '$($RegistryKey.Name)'）失败：$($_.Exception.Message)"
         }
         return
     }
@@ -129,7 +112,7 @@ function Restore-RegistryValueSnapshot {
             }
         }
 
-        throw "在 '$($RegistryKey.Name)' 中设置注册表值 '$valueName' 失败：$($_.Exception.Message)"
+        throw "设置注册表值 '$valueName'（位于 '$($RegistryKey.Name)'）失败：$($_.Exception.Message)"
     }
 }
 
@@ -146,7 +129,7 @@ function Convert-RegistryValueKindFromBackup {
         return [System.Enum]::Parse([Microsoft.Win32.RegistryValueKind], $KindName, $true)
     }
     catch {
-        throw "备份中的注册表值类型不受支持：$KindName"
+        throw "备份中不支持的注册表值类型：$KindName"
     }
 }
 

@@ -1,47 +1,44 @@
 ﻿function Get-RegistryBackupCapturePlans {
     param(
-        [Parameter(Mandatory)]
-        [object[]]$SelectedRegistryFeatures,
+        [object[]]$SelectedRegistryFeatures = @(),
+        [object[]]$UndoRegistryFeatures = @(),
         [switch]$UseSysprepRegFiles
     )
 
     $planMap = @{}
+
     foreach ($feature in $SelectedRegistryFeatures) {
-        $regFilePath = Get-RegistryFilePathForFeature -Feature $feature -UseSysprepRegFiles:$UseSysprepRegFiles
+        $regFilePath = Get-RegistryFilePathForFeature -RegistryKey $feature.RegistryKey -UseSysprepRegFiles:$UseSysprepRegFiles
         if (-not (Test-Path $regFilePath)) {
-            throw "找不到用于备份的注册表文件：$($feature.RegistryKey) ($regFilePath)"
+            throw "无法找到用于备份的注册表文件：$($feature.RegistryKey) ($regFilePath)"
         }
 
         foreach ($operation in @(Get-RegFileOperations -regFilePath $regFilePath)) {
             if (-not $operation.KeyPath) { continue }
+            Add-RegistryPlanOperation -PlanMap $planMap -Operation $operation
+        }
+    }
 
-            $mapKey = $operation.KeyPath.ToLowerInvariant()
-            if (-not $planMap.ContainsKey($mapKey)) {
-                $planMap[$mapKey] = [PSCustomObject]@{
-                    Path = $operation.KeyPath
-                    IncludeSubKeys = $false
-                    CaptureAllValues = $false
-                    ValueNames = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
-                }
+    foreach ($feature in $UndoRegistryFeatures) {
+        $regFilePath = Resolve-RegistryBackupUndoFilePath -Feature $feature
+        if ([string]::IsNullOrWhiteSpace($regFilePath)) {
+            continue
+        }
+
+        if (-not (Test-Path $regFilePath)) {
+            $undoKeyDescription = if (-not [string]::IsNullOrWhiteSpace([string]$feature.RegistryUndoKey)) {
+                [string]$feature.RegistryUndoKey
+            }
+            else {
+                [string]$feature.RegistryKey
             }
 
-            $plan = $planMap[$mapKey]
-            switch ($operation.OperationType) {
-                'DeleteKey' {
-                    $plan.IncludeSubKeys = $true
-                    $plan.CaptureAllValues = $true
-                }
-                'SetValue' {
-                    if (-not $plan.CaptureAllValues) {
-                        $null = $plan.ValueNames.Add([string]$operation.ValueName)
-                    }
-                }
-                'DeleteValue' {
-                    if (-not $plan.CaptureAllValues) {
-                        $null = $plan.ValueNames.Add([string]$operation.ValueName)
-                    }
-                }
-            }
+            throw "无法找到用于备份的注册表撤销文件：$undoKeyDescription ($regFilePath)"
+        }
+
+        foreach ($operation in @(Get-RegFileOperations -regFilePath $regFilePath)) {
+            if (-not $operation.KeyPath) { continue }
+            Add-RegistryPlanOperation -PlanMap $planMap -Operation $operation
         }
     }
 
@@ -57,10 +54,68 @@
     )
 }
 
-function Get-RegistrySnapshotsForBackup {
+function Add-RegistryPlanOperation {
+    param(
+        [hashtable]$PlanMap,
+        [PSCustomObject]$Operation
+    )
+
+    $mapKey = $Operation.KeyPath.ToLowerInvariant()
+    if (-not $PlanMap.ContainsKey($mapKey)) {
+        $PlanMap[$mapKey] = [PSCustomObject]@{
+            Path = $Operation.KeyPath
+            IncludeSubKeys = $false
+            CaptureAllValues = $false
+            ValueNames = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+        }
+    }
+
+    $plan = $PlanMap[$mapKey]
+    switch ($Operation.OperationType) {
+        'DeleteKey' {
+            $plan.IncludeSubKeys = $true
+            $plan.CaptureAllValues = $true
+        }
+        'SetValue' {
+            if (-not $plan.CaptureAllValues) {
+                $null = $plan.ValueNames.Add([string]$Operation.ValueName)
+            }
+        }
+        'DeleteValue' {
+            if (-not $plan.CaptureAllValues) {
+                $null = $plan.ValueNames.Add([string]$Operation.ValueName)
+            }
+        }
+    }
+}
+
+function Resolve-RegistryBackupUndoFilePath {
     param(
         [Parameter(Mandatory)]
-        [object[]]$CapturePlans
+        $Feature
+    )
+
+    $undoRegistryKey = [string]$Feature.RegistryUndoKey
+    if (-not [string]::IsNullOrWhiteSpace($undoRegistryKey)) {
+        $resolvedUndoPath = Resolve-UndoRegFilePath -FileName $undoRegistryKey
+        return Join-Path $script:RegfilesPath $resolvedUndoPath
+    }
+
+    $resolvedRegistryKey = [string]$Feature.RegistryKey
+    if ([string]::IsNullOrWhiteSpace($resolvedRegistryKey)) {
+        return $null
+    }
+
+    if ([System.IO.Path]::IsPathRooted($resolvedRegistryKey)) {
+        return $resolvedRegistryKey
+    }
+
+    return Join-Path $script:RegfilesPath $resolvedRegistryKey
+}
+
+function Get-RegistrySnapshotsForBackup {
+    param(
+        [object[]]$CapturePlans = @()
     )
 
     if ($CapturePlans.Count -eq 0) {
@@ -92,31 +147,14 @@ function Invoke-WithLoadedBackupHive {
         $ArgumentObject = $null
     )
 
-    $hiveDatPath = if ($script:Params.ContainsKey('Sysprep')) {
-        GetUserDirectory -userName 'Default' -fileName 'NTUSER.DAT'
+    $targetUserName = if ($script:Params.ContainsKey('Sysprep')) {
+        'Default'
     }
     else {
-        GetUserDirectory -userName $script:Params.Item('User') -fileName 'NTUSER.DAT'
+        $script:Params.Item('User')
     }
 
-    $global:LASTEXITCODE = 0
-    reg load 'HKU\Default' "$hiveDatPath" | Out-Null
-    $loadExitCode = $LASTEXITCODE
-    if ($loadExitCode -ne 0) {
-        throw "无法加载用于注册表备份的用户配置单元 '$hiveDatPath'（退出代码：$loadExitCode）"
-    }
-
-    try {
-        return & $ScriptBlock $ArgumentObject
-    }
-    finally {
-        $global:LASTEXITCODE = 0
-        reg unload 'HKU\Default' | Out-Null
-        $unloadExitCode = $LASTEXITCODE
-        if ($unloadExitCode -ne 0) {
-            throw "卸载注册表配置单元 'HKU\Default' 失败（退出代码：$unloadExitCode）"
-        }
-    }
+    return Invoke-WithTargetUserHive -TargetUserName $targetUserName -ScriptBlock $ScriptBlock -ArgumentObject $ArgumentObject
 }
 
 function Get-RegistryKeySnapshot {
@@ -130,12 +168,12 @@ function Get-RegistryKeySnapshot {
 
     $registryParts = Split-RegistryPath -path $KeyPath
     if (-not $registryParts) {
-        throw "备份中的注册表路径不受支持：$KeyPath"
+        throw "备份中不支持的注册表路径：$KeyPath"
     }
 
     $rootKey = Get-RegistryRootKey -hiveName $registryParts.Hive
     if (-not $rootKey) {
-        throw "备份中的注册表配置单元不受支持：$($registryParts.Hive)"
+        throw "备份中不支持的注册表配置单元：$($registryParts.Hive)"
     }
 
     $subKeyPath = $registryParts.SubKey
@@ -238,7 +276,7 @@ function Convert-RegistryValueToSnapshot {
     catch {
         $valueType = if ($null -ne $value) { $value.GetType().FullName } else { '<null>' }
         $valueForLog = if ($null -eq $value) { '<null>' } elseif ($value -is [array]) { ($value -join ',') } else { [string]$value }
-        throw "规范化备份用注册表值失败。Key='$($RegistryKey.Name)' Name='$ValueName' Kind='$valueKind' RawType='$valueType' RawValue='$valueForLog'。内部错误：$($_.Exception.Message)"
+        throw "无法规范化注册表值以进行备份。键='$($RegistryKey.Name)' 名称='$ValueName' 类型='$valueKind' 原始类型='$valueType' 原始值='$valueForLog'。内部错误：$($_.Exception.Message)"
     }
 
     return @{

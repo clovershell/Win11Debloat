@@ -2,7 +2,7 @@
 function LoadAppsDetailsFromJson {
     param (
         [switch]$OnlyInstalled,
-        [string]$InstalledList = "",
+        [object[]]$InstalledList = $null,
         [switch]$InitialCheckedFromJson
     )
 
@@ -24,15 +24,19 @@ function LoadAppsDetailsFromJson {
         if ($OnlyInstalled) {
             $isInstalled = $false
             foreach ($appId in $appIdArray) {
-                if (($InstalledList -like ("*$appId*")) -or (Get-AppxPackage -Name $appId)) {
+                # Check Get-AppxPackage first (fast, no process launch)
+                if (Get-AppxPackage -Name $appId) {
                     $isInstalled = $true
                     break
                 }
-                if (($appId -eq "Microsoft.Edge") -and ($InstalledList -like "* Microsoft.Edge *")) {
+
+                # Then check the pre-fetched winget list
+                if ($InstalledList -and (Test-AppInWingetList -appId $appId -InstalledList $InstalledList)) {
                     $isInstalled = $true
                     break
                 }
             }
+
             if (-not $isInstalled) { continue }
         }
 
@@ -52,6 +56,7 @@ function LoadAppsDetailsFromJson {
             Description = $appData.Description
             SelectedByDefault = $appData.SelectedByDefault
             Recommendation = $appData.Recommendation
+            RemovalMethod = if ($appData.RemovalMethod -and $appData.RemovalMethod -eq 'WinGet') { 'WinGet' } else { 'Appx' }
         }
     }
 

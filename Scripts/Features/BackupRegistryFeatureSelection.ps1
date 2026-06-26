@@ -1,21 +1,13 @@
-﻿function Get-FeatureId {
-    param(
-        [Parameter(Mandatory)]
-        $Feature
-    )
+<#
+    .SYNOPSIS
+        Filters a list of features to those that have a non-empty RegistryKey.
 
-    $featureId = [string]$Feature.FeatureId
-    if ([string]::IsNullOrWhiteSpace($featureId)) {
-        throw '所选功能缺少必需的 FeatureId。'
-    }
-
-    return $featureId
-}
-
+    .PARAMETER Features
+        An array of feature objects to filter.
+#>
 function Get-RegistryBackedFeatures {
     param(
-        [Parameter(Mandatory)]
-        [object[]]$Features
+        [object[]]$Features = @()
     )
 
     return @($Features | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_.RegistryKey) })

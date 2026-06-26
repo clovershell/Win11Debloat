@@ -1,4 +1,24 @@
-﻿function Hide-Bubble {
+﻿<#
+.SYNOPSIS
+    Hides the currently displayed bubble popup.
+
+.DESCRIPTION
+    Closes the bubble popup with a smooth fade-out animation (220ms). If the
+    -Immediate switch is used, the popup is closed instantly without animation.
+    This function is called automatically by Show-Bubble's timer and can also
+    be invoked manually to dismiss the bubble early.
+
+.PARAMETER Immediate
+    If specified, the bubble popup is closed instantly without a fade-out
+    animation. Any pending close timer is also stopped.
+
+.EXAMPLE
+    Hide-Bubble
+
+.EXAMPLE
+    Hide-Bubble -Immediate
+#>
+function Hide-Bubble {
     param (
         [Parameter(Mandatory=$false)]
         [switch]$Immediate
@@ -37,13 +57,41 @@
     $bubblePanel.BeginAnimation([System.Windows.UIElement]::OpacityProperty, $fadeOut)
 }
 
+<#
+.SYNOPSIS
+    Displays a transient bubble popup hint anchored above a target control.
+
+.DESCRIPTION
+    Shows a WPF popup styled as a speech bubble above the specified target
+    control. The bubble fades in with a animation, displays for a configurable 
+    duration, then fades out. Any previously shown bubble is dismissed 
+    immediately before showing the new one.
+
+.PARAMETER TargetControl
+    The WPF Control above which the bubble popup will be placed. This
+    parameter is mandatory.
+
+.PARAMETER Message
+    The text message to display inside the bubble. Defaults to
+    '在此查看已选择的更改'.
+
+.PARAMETER DurationSeconds
+    The number of seconds the bubble remains visible before auto-hiding.
+    The minimum value is 1 second. Defaults to 5 seconds.
+
+.EXAMPLE
+    Show-Bubble -TargetControl $myButton
+
+.EXAMPLE
+    Show-Bubble -TargetControl $myButton -Message 'Changes saved!' -DurationSeconds 3
+#>
 function Show-Bubble {
     param (
         [Parameter(Mandatory=$true)]
         [System.Windows.Controls.Control]$TargetControl,
 
         [Parameter(Mandatory=$false)]
-        [string]$Message = '在此查看所选变更',
+        [string]$Message = '在此查看已选择的更改',
 
         [Parameter(Mandatory=$false)]
         [int]$DurationSeconds = 5

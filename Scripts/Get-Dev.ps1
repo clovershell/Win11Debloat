@@ -7,7 +7,6 @@
     [string]$User,
     [switch]$NoRestartExplorer,
     [switch]$CreateRestorePoint,
-    [switch]$RunAppsListGenerator,
     [switch]$RunDefaults,
     [switch]$RunDefaultsLite,
     [switch]$RunSavedSettings,
@@ -15,11 +14,8 @@
     [string]$Apps,
     [string]$AppRemovalTarget,
     [switch]$RemoveApps,
-    [switch]$RemoveAppsCustom,
     [switch]$RemoveGamingApps,
-    [switch]$RemoveCommApps,
     [switch]$RemoveHPApps,
-    [switch]$RemoveW11Outlook,
     [switch]$ForceRemoveEdge,
     [switch]$DisableDVR,
     [switch]$DisableGameBarIntegration,
@@ -58,7 +54,7 @@
     [switch]$HideSearchTb, [switch]$ShowSearchIconTb, [switch]$ShowSearchLabelTb, [switch]$ShowSearchBoxTb,
     [switch]$HideTaskview,
     [switch]$DisableStartRecommended,
-    [switch]$DisableStartAllApps,
+    [switch]$DisableStartAllApps, [switch]$StartAllAppsCategory, [switch]$StartAllAppsGrid, [switch]$StartAllAppsList,
     [switch]$DisableStartPhoneLink,
     [switch]$DisableCopilot,
     [switch]$DisableRecall,
@@ -105,7 +101,7 @@
 
 # Show error if current powershell environment does not have LanguageMode set to FullLanguage 
 if ($ExecutionContext.SessionState.LanguageMode -ne "FullLanguage") {
-   Write-Host "错误：Win11Debloat 无法在您的系统上运行。安全策略限制了 PowerShell 的执行" -ForegroundColor Red
+   Write-Host "错误：Win11Debloat 无法在您的系统上运行。PowerShell 执行受到安全策略限制" -ForegroundColor Red
    Write-Output ""
    Write-Output "按 Enter 键退出..."
    Read-Host | Out-Null
@@ -121,7 +117,7 @@ $tempRootPath = $env:TEMP
 $tempWorkPath = Join-Path $tempRootPath 'Win11Debloat'
 $tempArchivePath = Join-Path $tempRootPath 'win11debloat.zip'
 
-Write-Output "> 正在下载 Win11Debloat 开发版本..."
+Write-Output "> 正在下载 Win11Debloat 开发版..."
 
 # Download latest version of Win11Debloat from GitHub master branch as zip archive
 try {
@@ -135,12 +131,12 @@ catch {
     Exit
 }
 
-Write-Output ""
-Write-Output "> 正在清理旧的 Win11Debloat 文件夹..."
-
-# Remove old script folder if it exists, but keep config and log files
+# Remove old script folder if it exists, but keep configs, logs and backups
 if (Test-Path $tempWorkPath) {
-    Get-ChildItem -Path $tempWorkPath -Exclude CustomAppsList,LastUsedSettings.json,Win11Debloat.log,Config,Logs,Backups | Remove-Item -Recurse -Force
+    Write-Output ""
+    Write-Output "> 正在清理旧的 Win11Debloat 文件夹..."
+
+    Get-ChildItem -Path $tempWorkPath -Exclude Config,Logs,Backups | Remove-Item -Recurse -Force
 }
 
 $configDir = Join-Path $tempWorkPath 'Config'
@@ -148,10 +144,12 @@ $backupDir = Join-Path $tempWorkPath 'ConfigOld'
 
 # Temporarily move existing config files if they exist to prevent them from being overwritten by the new script files, will be moved back after the new script is unpacked
 if (Test-Path "$configDir") {
+    Write-Output ""
+    Write-Output "> 正在备份现有配置文件..."
+
     New-Item -ItemType Directory -Path "$backupDir" -Force | Out-Null
 
     $filesToKeep = @(
-        'CustomAppsList',
         'LastUsedSettings.json'
     )
 
@@ -177,6 +175,9 @@ if (Test-Path "$backupDir") {
     if (-not (Test-Path "$configDir")) {
         New-Item -ItemType Directory -Path "$configDir" -Force | Out-Null
     }
+
+    Write-Output ""
+    Write-Output "> 正在恢复现有配置文件..."
 
     Get-ChildItem -Path "$backupDir" -Recurse | Move-Item -Destination "$configDir"
     Remove-Item "$backupDir" -Recurse -Force
@@ -218,13 +219,13 @@ if ($null -ne $debloatProcess) {
     $debloatProcess.WaitForExit()
 }
 
-# Remove all remaining script files, except for CustomAppsList and LastUsedSettings.json files
+# Remove all remaining script files, except for configs, logs and backups
 if (Test-Path $tempWorkPath) {
     Write-Output ""
     Write-Output "> 正在清理..."
 
     # Cleanup, remove Win11Debloat directory
-    Get-ChildItem -Path $tempWorkPath -Exclude CustomAppsList,LastUsedSettings.json,Win11Debloat.log,Win11Debloat-Run.log,Config,Logs,Backups | Remove-Item -Recurse -Force
+    Get-ChildItem -Path $tempWorkPath -Exclude Config,Logs,Backups | Remove-Item -Recurse -Force
 }
 
 Write-Output ""

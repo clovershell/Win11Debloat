@@ -53,14 +53,14 @@ function Show-AppSelectionWindow {
         $window.Dispatcher.Invoke([System.Windows.Threading.DispatcherPriority]::Background, [action]{})
 
         $appsPanel.Children.Clear()
-        $listOfApps = ""
+        $listOfApps = $null
 
         if ($onlyInstalledBox.IsChecked -and ($script:WingetInstalled -eq $true)) {
             # Attempt to get a list of installed apps via WinGet, times out after 10 seconds
-            $listOfApps = GetInstalledAppsViaWinget -TimeOut 10
-            if (-not $listOfApps) {
+            $listOfApps = GetInstalledAppsViaWinget -TimeOut 10 -NonBlocking
+            if ($null -eq $listOfApps) {
                 # Show error that the script was unable to get list of apps from WinGet
-                Show-MessageBox -Message '无法通过 WinGet 加载已安装的应用列表。' -Title '错误' -Button 'OK' -Icon 'Error' -Owner $window | Out-Null
+                Show-MessageBox -Message '无法通过 WinGet 加载已安装应用列表。' -Title '错误' -Button 'OK' -Icon 'Error' -Owner $window | Out-Null
                 $onlyInstalledBox.IsChecked = $false
             }
         }
@@ -130,15 +130,11 @@ function Show-AppSelectionWindow {
             return
         }
 
-        if ($selectedApps -contains "Microsoft.WindowsStore" -and -not $Silent) {
-            $result = Show-MessageBox -Message '确定要卸载 Microsoft Store 吗？此应用无法轻松重新安装。' -Title '确定吗？' -Button 'YesNo' -Icon 'Warning' -Owner $window
-
-            if ($result -eq 'No') {
-                return
-            }
+        if (-not (ConfirmUnsafeAppRemoval -SelectedApps $selectedApps -Owner $window)) {
+            return
         }
 
-        SaveCustomAppsListToFile -appsList $selectedApps
+        $script:SelectedApps = $selectedApps
 
         $window.DialogResult = $true
     })

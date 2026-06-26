@@ -7,26 +7,6 @@
     )
     
     Add-Type -AssemblyName PresentationFramework,PresentationCore,WindowsBase | Out-Null
-
-    # P/Invoke helpers for forcing focus back after Explorer restart
-    if (-not ([System.Management.Automation.PSTypeName]'Win11Debloat.FocusHelper').Type) {
-        Add-Type -Namespace Win11Debloat -Name FocusHelper -MemberDefinition @'
-            [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
-            [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
-            [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, IntPtr lpdwProcessId);
-            [DllImport("user32.dll")] public static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
-            [DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId();
-
-            public static void ForceActivate(IntPtr hwnd) {
-                IntPtr fg = GetForegroundWindow();
-                uint fgThread = GetWindowThreadProcessId(fg, IntPtr.Zero);
-                uint myThread = GetCurrentThreadId();
-                if (fgThread != myThread) AttachThreadInput(myThread, fgThread, true);
-                SetForegroundWindow(hwnd);
-                if (fgThread != myThread) AttachThreadInput(myThread, fgThread, false);
-            }
-'@
-    }
     
     $usesDarkMode = GetSystemUsesDarkMode
     
@@ -84,12 +64,12 @@
     # Initialize in-progress state
     $script:ApplyInProgressPanel.Visibility = 'Visible'
     $script:ApplyCompletionPanel.Visibility = 'Collapsed'
-    $script:ApplyStepNameEl.Text = "正在准备..."
-    $script:ApplyStepCounterEl.Text = "正在准备..."
+    $script:ApplyStepNameEl.Text = "准备中..."
+    $script:ApplyStepCounterEl.Text = "准备中..."
     $script:ApplyProgressBarEl.Value = 0
     $script:ApplyModalInErrorState = $false
     
-    # Set up progress callback for ExecuteAllChanges
+    # Set up progress callback for Invoke-AllChanges
     $script:ApplyProgressCallback = {
         param($currentStep, $totalSteps, $stepName)
         $script:ApplyStepNameEl.Text = $stepName
@@ -122,7 +102,7 @@
     # Run changes in background to keep UI responsive
     $applyWindow.Dispatcher.BeginInvoke([System.Windows.Threading.DispatcherPriority]::Background, [action]{
         try {
-            ExecuteAllChanges
+            Invoke-AllChanges
 
             $registryImportFailureCount = [int]$script:RegistryImportFailures
             
@@ -133,16 +113,15 @@
                 # Wait for Explorer to finish relaunching, then reclaim focus.
                 Start-Sleep -Milliseconds 800
                 $applyWindow.Dispatcher.Invoke([action]{
-                    $hwnd = (New-Object System.Windows.Interop.WindowInteropHelper($applyWindow)).Handle
-                    [Win11Debloat.FocusHelper]::ForceActivate($hwnd)
+                    $applyWindow.Activate()
                 })
             }
             
             Write-Host ""
             if ($script:CancelRequested) {
-                Write-Host "脚本执行已被用户取消。部分变更可能尚未应用。"
+                Write-Host "脚本执行已被用户取消。部分更改可能未被应用。"
             } elseif ($registryImportFailureCount -eq 0) {
-                Write-Host "所有变更已成功应用！"
+                Write-Host "所有更改已成功应用！"
             }
             
             # Show completion state
@@ -158,10 +137,10 @@
             } elseif ($registryImportFailureCount -gt 0) {
                 $script:ApplyCompletionIconEl.Text = [char]0xE7BA
                 $script:ApplyCompletionIconEl.Foreground = [System.Windows.Media.SolidColorBrush]::new([System.Windows.Media.ColorConverter]::ConvertFromString("#e8912d"))
-                $script:ApplyCompletionTitleEl.Text = "变更已应用但存在错误"
-                $script:ApplyCompletionMessageEl.Text = "$registryImportFailureCount 项注册表变更失败。详细信息请查看控制台。"
+                $script:ApplyCompletionTitleEl.Text = "更改已应用但存在错误"
+                $script:ApplyCompletionMessageEl.Text = "$registryImportFailureCount 项注册表更改失败。请查看控制台了解详情。"
             } else {
-                $script:ApplyCompletionTitleEl.Text = "变更已应用"
+                $script:ApplyCompletionTitleEl.Text = "更改已应用"
 
                 # Show completion message with reboot instructions if any applied features require reboot
                 if ($RestartExplorer) {
@@ -178,7 +157,7 @@
                             $tb = [System.Windows.Controls.TextBlock]::new()
                             $tb.Text = "$([char]0x2022) $featureName"
                             $tb.FontSize = 12
-                            $tb.SetResourceReference([System.Windows.Controls.TextBlock]::ForegroundProperty, 'FgColor')
+                            $tb.SetResourceReference([System.Windows.Controls.TextBlock]::ForegroundProperty, "AppFgColor")
                             $tb.Opacity = 0.85
                             $tb.Margin = [System.Windows.Thickness]::new(0, 2, 0, 0)
                             $applyRebootList.Children.Add($tb) | Out-Null
@@ -186,20 +165,20 @@
                         $applyRebootPanel.Visibility = 'Visible'
                     }
                     else {
-                        $script:ApplyCompletionMessageEl.Text = "你的系统已清理完毕，感谢使用 Win11Debloat！"
+                        $script:ApplyCompletionMessageEl.Text = "系统已就绪。感谢使用 Win11Debloat！"
                     }
                 }
             }
             $applyWindow.Dispatcher.Invoke([System.Windows.Threading.DispatcherPriority]::Render, [action]{})
         }
         catch {
-            Write-Host "错误：$($_.Exception.Message)"
+            Write-Host "Error: $($_.Exception.Message)"
             $script:ApplyInProgressPanel.Visibility = 'Collapsed'
             $script:ApplyCompletionPanel.Visibility = 'Visible'
             $script:ApplyCompletionIconEl.Text = [char]0xEA39
             $script:ApplyCompletionIconEl.Foreground = [System.Windows.Media.SolidColorBrush]::new([System.Windows.Media.ColorConverter]::ConvertFromString("#c42b1c"))
             $script:ApplyCompletionTitleEl.Text = "错误"
-            $script:ApplyCompletionMessageEl.Text = "应用变更时发生错误：$($_.Exception.Message)"
+            $script:ApplyCompletionMessageEl.Text = "应用更改时发生错误：$($_.Exception.Message)"
             
             # Set error state to change Kofi button to report link
             $script:ApplyModalInErrorState = $true
@@ -208,14 +187,14 @@
             $applyKofiBtn.Content = $null
             
             $reportText = [System.Windows.Controls.TextBlock]::new()
-            $reportText.Text = '报告 Bug'
+            $reportText.Text = '报告问题'
             $reportText.VerticalAlignment = 'Center'
             $reportText.FontSize = 14
             $reportText.Margin = [System.Windows.Thickness]::new(0, 0, 0, 1)
 
             $applyKofiBtn.Content = $reportText
-
-            [System.Windows.Automation.AutomationProperties]::SetName($applyKofiBtn, '报告 Bug')
+            
+            [System.Windows.Automation.AutomationProperties]::SetName($applyKofiBtn, '报告问题')
             
             $applyWindow.Dispatcher.Invoke([System.Windows.Threading.DispatcherPriority]::Render, [action]{})
         }

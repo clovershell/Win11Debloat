@@ -1,6 +1,5 @@
 ﻿function Show-RestoreBackupDialog {
     param(
-        [Parameter(Mandatory = $false)]
         [System.Windows.Window]$Owner = $null
     )
 
@@ -26,7 +25,7 @@
 
     $schemaPath = $script:RestoreBackupWindowSchema
     if (-not $schemaPath -or -not (Test-Path $schemaPath)) {
-        throw '未找到还原备份窗口的架构文件。'
+        throw '找不到恢复备份窗口架构文件。'
     }
 
     $xaml = Get-Content -Path $schemaPath -Raw
@@ -70,6 +69,9 @@
     $backupCreatedText = $window.FindName('BackupCreatedText')
     $backupTargetText = $window.FindName('BackupTargetText')
     $featuresItemsControl = $window.FindName('FeaturesItemsControl')
+    $reappliedSeparator = $window.FindName('ReappliedSeparator')
+    $reappliedPanel = $window.FindName('ReappliedPanel')
+    $reappliedFeaturesItemsControl = $window.FindName('ReappliedFeaturesItemsControl')
     $nonRevertibleSeparator = $window.FindName('NonRevertibleSeparator')
     $nonRevertiblePanel = $window.FindName('NonRevertiblePanel')
     $nonRevertibleFeaturesItemsControl = $window.FindName('NonRevertibleFeaturesItemsControl')
@@ -95,7 +97,7 @@
 
     $showStartMenuIntroState = {
         $backupFileText.Text = '未选择'
-        $backupCreatedText.Text = '无'
+        $backupCreatedText.Text = '不适用'
         $overviewSummaryText.Visibility = 'Collapsed'
         $overviewPanel.Visibility = 'Collapsed'
         $startMenuIntroPanel.Visibility = 'Visible'
@@ -107,7 +109,7 @@
 
         $scopeInfo = & $getStartMenuScopeInfo
         $backupTargetText.Text = GetFriendlyRegistryBackupTarget -Target $scopeInfo.Target
-        $overviewSummaryText.Text = "这将使用所选备份替换 $($scopeInfo.SummaryText) 的当前开始菜单固定应用布局。"
+        $overviewSummaryText.Text = "这将用所选备份替换$($scopeInfo.SummaryText)的当前开始菜单固定应用布局。"
         $backupFileText.Text = Split-Path -Path $BackupFilePath -Leaf
 
         $createdText = '未知'
@@ -119,6 +121,8 @@
 
         $overviewFeaturesSection.Visibility = 'Collapsed'
         $overviewSummaryText.Visibility = 'Visible'
+        $reappliedSeparator.Visibility = 'Collapsed'
+        $reappliedPanel.Visibility = 'Collapsed'
         $nonRevertibleSeparator.Visibility = 'Collapsed'
         $nonRevertiblePanel.Visibility = 'Collapsed'
         $introInfoPanel.Visibility = 'Collapsed'
@@ -147,7 +151,7 @@
         $isAutoBackupEnabled = ($startMenuAutoBackupCheck.IsChecked -eq $true)
         $hasSelectedManualFile = -not [string]::IsNullOrWhiteSpace($state.SelectedStartMenuBackupFilePath)
         if ($isAutoBackupEnabled -or $hasSelectedManualFile) {
-            $primaryActionBtn.Content = '还原备份'
+            $primaryActionBtn.Content = '恢复备份'
         }
         else {
             $primaryActionBtn.Content = '选择备份文件'
@@ -160,7 +164,7 @@
     }
 
     $enterSelectTypeStep = {
-        $titleText.Text = '还原备份'
+        $titleText.Text = '恢复备份'
         $restoreModeTabs.SelectedIndex = 0
         $backBtn.Visibility = 'Visible'
         $backBtn.Content = '取消'
@@ -170,7 +174,7 @@
     }
 
     $enterRegistryStep = {
-        $titleText.Text = '还原注册表备份'
+        $titleText.Text = '恢复注册表备份'
         $restoreModeTabs.SelectedIndex = 1
         $introInfoPanel.Visibility = 'Visible'
         $overviewPanel.Visibility = 'Collapsed'
@@ -185,13 +189,17 @@
     }
 
     $enterStartMenuStep = {
-        $titleText.Text = '还原开始菜单备份'
+        $titleText.Text = '恢复开始菜单备份'
         $restoreModeTabs.SelectedIndex = 2
         $backBtn.Visibility = 'Visible'
         $backBtn.Content = '返回'
         $primaryActionBtn.Visibility = 'Visible'
         $primaryActionBtn.IsDefault = $true
         $chooseRegistryBtn.IsDefault = $false
+
+        # Show intro panel so user can configure scope & auto-detect
+        $startMenuAutoBackupCheck.IsChecked = $true
+        $state.SelectedStartMenuBackupFilePath = $null
         & $refreshStartMenuUi
     }
 
@@ -215,27 +223,50 @@
             }
         }
 
-        $selectedFeatureIds = Get-SelectedFeatureIdsFromBackup -SelectedBackup $SelectedBackup
-        $featureLists = Get-RestoreBackupFeatureLists -SelectedFeatureIds $selectedFeatureIds -Features $script:Features
-        $revertibleFeaturesList = @($featureLists.Revertible)
-        $nonRevertibleFeaturesList = @($featureLists.NonRevertible)
-        Write-Host "备份概览已准备好。可还原项=$($revertibleFeaturesList.Count)，不可还原项=$($nonRevertibleFeaturesList.Count)"
+        $selectedForwardFeatureIds = @(Get-SelectedForwardFeatureIdsFromBackup -SelectedBackup $SelectedBackup)
+        $selectedUndoFeatureIds = @(Get-SelectedUndoFeatureIdsFromBackup -SelectedBackup $SelectedBackup)
 
-        if ($revertibleFeaturesList.Count -eq 0) {
-            throw '所选备份不包含任何可还原的变更。'
+        $seenForwardFeatureIds = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+        foreach ($featureId in $selectedForwardFeatureIds) {
+            [void]$seenForwardFeatureIds.Add([string]$featureId)
+        }
+
+        $filteredUndoFeatureIds = New-Object System.Collections.Generic.List[string]
+        foreach ($featureId in $selectedUndoFeatureIds) {
+            if ($seenForwardFeatureIds.Contains([string]$featureId)) {
+                continue
+            }
+
+            $filteredUndoFeatureIds.Add([string]$featureId)
+        }
+
+        $forwardFeatureLists = Get-RestoreBackupFeatureLists -SelectedFeatureIds $selectedForwardFeatureIds -Features $script:Features
+        $undoFeatureLists = Get-RestoreBackupFeatureLists -SelectedFeatureIds @($filteredUndoFeatureIds.ToArray()) -Features $script:Features
+        $combinedFeatureLists = Get-RestoreBackupFeatureLists -SelectedFeatureIds (Get-SelectedFeatureIdsFromBackup -SelectedBackup $SelectedBackup) -Features $script:Features
+
+        $revertibleFeaturesList = @($forwardFeatureLists.Revertible)
+        $reappliedFeaturesList = @($undoFeatureLists.Revertible)
+        $nonRevertibleFeaturesList = @($combinedFeatureLists.NonRevertible)
+        Write-Host "备份概览已准备。可恢复=$($revertibleFeaturesList.Count)，已重新应用=$($reappliedFeaturesList.Count)，不可恢复=$($nonRevertibleFeaturesList.Count)"
+
+        if ($revertibleFeaturesList.Count -eq 0 -and $reappliedFeaturesList.Count -eq 0) {
+            throw '所选备份不包含可恢复的更改。'
         }
 
         $backupFileText.Text = Split-Path $SelectedBackupFilePath -Leaf
         $backupCreatedText.Text = $createdText
         $backupTargetText.Text = GetFriendlyRegistryBackupTarget -Target ([string]$SelectedBackup.Target)
         $featuresItemsControl.ItemsSource = $revertibleFeaturesList
-        $overviewFeaturesSection.Visibility = 'Visible'
+        $overviewFeaturesSection.Visibility = if ($revertibleFeaturesList.Count -gt 0) { 'Visible' } else { 'Collapsed' }
+        $reappliedFeaturesItemsControl.ItemsSource = $reappliedFeaturesList
+        if ($reappliedFeaturesList.Count -gt 0) { $reappliedPanel.Visibility = 'Visible' } else { $reappliedPanel.Visibility = 'Collapsed' }
+        if ($revertibleFeaturesList.Count -gt 0 -and $reappliedFeaturesList.Count -gt 0) { $reappliedSeparator.Visibility = 'Visible' } else { $reappliedSeparator.Visibility = 'Collapsed' }
         $overviewSummaryText.Visibility = 'Collapsed'
         $nonRevertibleFeaturesItemsControl.ItemsSource = $nonRevertibleFeaturesList
 
         $hasNonRevertibleItems = ($nonRevertibleFeaturesList.Count -gt 0)
         if ($hasNonRevertibleItems) { $nonRevertiblePanel.Visibility = 'Visible' } else { $nonRevertiblePanel.Visibility = 'Collapsed' }
-        if ($hasNonRevertibleItems) { $nonRevertibleSeparator.Visibility = 'Visible' } else { $nonRevertibleSeparator.Visibility = 'Collapsed' }
+        if ($hasNonRevertibleItems -and ($revertibleFeaturesList.Count -gt 0 -or $reappliedFeaturesList.Count -gt 0)) { $nonRevertibleSeparator.Visibility = 'Visible' } else { $nonRevertibleSeparator.Visibility = 'Collapsed' }
         $introInfoPanel.Visibility = 'Collapsed'
         $overviewPanel.Visibility = 'Visible'
 
@@ -255,7 +286,7 @@
 
         $openDialog = New-Object Microsoft.Win32.OpenFileDialog
         $openDialog.Title = '选择注册表备份文件'
-        $openDialog.Filter = '注册表备份 (*.json)|*.json'
+        $openDialog.Filter = 'Registry backup (*.json)|*.json'
         $openDialog.DefaultExt = '.json'
         $openDialog.InitialDirectory = $script:RegistryBackupsPath
 
@@ -271,7 +302,7 @@
         }
 
         $state.SelectedRegistryBackup = $selectedBackup
-        $primaryActionBtn.Content = '从备份还原'
+        $primaryActionBtn.Content = '从备份恢复'
     }
 
     $handleStartMenuPrimaryAction = {
@@ -281,7 +312,7 @@
         if ($useManualBackupFile -and [string]::IsNullOrWhiteSpace($state.SelectedStartMenuBackupFilePath)) {
             $openDialog = New-Object Microsoft.Win32.OpenFileDialog
             $openDialog.Title = '选择开始菜单备份文件'
-            $openDialog.Filter = '开始菜单备份 (*.bak)|*.bak'
+            $openDialog.Filter = 'Start Menu backup (*.bak)|*.bak'
             $openDialog.InitialDirectory = "$env:LOCALAPPDATA\Packages\Microsoft.Windows.StartMenuExperienceHost_cw5n1h2txyewy\LocalState"
             $openDialog.DefaultExt = '.bak'
 
@@ -290,9 +321,20 @@
             }
 
             $state.SelectedStartMenuBackupFilePath = $openDialog.FileName
-            Write-Host "已选择的开始菜单备份文件：$($state.SelectedStartMenuBackupFilePath)"
+            Write-Host "已选择开始菜单备份文件：$($state.SelectedStartMenuBackupFilePath)"
             & $refreshStartMenuUi
             return
+        }
+
+        if (-not $useManualBackupFile) {
+            $scopeInfo = & $getStartMenuScopeInfo
+            $autoBackupPath = Get-StartMenuBackupPath -Scope $scopeInfo.Scope
+            if ($null -eq $autoBackupPath) {
+                $scopeText = $scopeInfo.SummaryText
+                Show-MessageBox -Owner $window -Title '未找到备份' -Message "未找到 $scopeText 的开始菜单备份文件。取消勾选'自动查找开始菜单备份'以手动选择备份文件。" -Button 'OK' -Icon 'Warning' | Out-Null
+                return
+            }
+            $state.SelectedStartMenuBackupFilePath = if ($scopeInfo.Scope -eq 'CurrentUser') { $autoBackupPath } else { $null }
         }
 
         $window.Tag = @{
@@ -326,6 +368,7 @@
     })
 
     $startMenuScopeCombo.Add_SelectionChanged({
+        $state.SelectedStartMenuBackupFilePath = $null
         & $refreshStartMenuUi
     })
 
@@ -387,8 +430,8 @@
         $null = $window.ShowDialog()
     }
     catch {
-        $innerMessage = if ($_.Exception.InnerException) { $_.Exception.InnerException.Message } else { '无' }
-        throw "无法显示还原备份对话框。错误：$($_.Exception.Message) 内部异常：$innerMessage"
+        $innerMessage = if ($_.Exception.InnerException) { $_.Exception.InnerException.Message } else { 'None' }
+        throw "显示恢复备份对话框失败。错误：$($_.Exception.Message) 内部：$innerMessage"
     }
     finally {
         if ($overlay -and -not $overlayWasAlreadyVisible) {

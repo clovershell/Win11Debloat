@@ -1,8 +1,18 @@
 ﻿# Restart the Windows Explorer process
 function RestartExplorer {
-    Write-Host "> 正在尝试重启 Windows 资源管理器进程以应用所有更改..."
+    # Restarting Explorer while running in Sysprep or User context is not necessary
+    if ($script:Params.ContainsKey("Sysprep") -or $script:Params.ContainsKey("User")) {
+        return
+    }
 
-    if ($script:Params.ContainsKey("Sysprep") -or $script:Params.ContainsKey("User") -or $script:Params.ContainsKey("NoRestartExplorer")) {
+    if ($script:Params.ContainsKey("WhatIf")) {
+        Write-Host "[WhatIf] 重启 Windows 资源管理器进程" -ForegroundColor Cyan
+        return
+    }
+
+    Write-Host "> 正在尝试重启 Windows 资源管理器进程以应用所有更改..."
+    
+    if ($script:Params.ContainsKey("NoRestartExplorer")) {
         Write-Host "已跳过资源管理器进程重启，请手动重启电脑以应用所有更改" -ForegroundColor Yellow
         return
     }

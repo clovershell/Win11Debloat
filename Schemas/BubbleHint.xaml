@@ -26,7 +26,7 @@
                Text="在此查看已选更改"
                TextWrapping="Wrap"
                MaxWidth="260"
-               Foreground="{DynamicResource FgColor}"/>
+               Foreground="{DynamicResource AppFgColor}"/>
       </Border>
     </Grid>
 

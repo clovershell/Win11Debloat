@@ -30,15 +30,52 @@
     }
 
     if ($hasInvalidSelectedFeatureId) {
-        $errors.Add('SelectedFeatures 必须包含非空的字符串功能 ID。')
-    }
-
-    if ($selectedFeatures.Count -eq 0) {
-        $errors.Add('SelectedFeatures 必须至少包含一个功能 ID。')
+        $errors.Add('SelectedFeatures 必须包含非空字符串的功能 ID。')
     }
 
     return [PSCustomObject]@{
         SelectedFeatures = $selectedFeatures.ToArray()
+        Errors = $errors.ToArray()
+    }
+}
+
+function Get-NormalizedSelectedUndoFeatureIdsFromBackup {
+    param(
+        [Parameter(Mandatory)]
+        $Backup
+    )
+
+    $selectedUndoFeatures = New-Object System.Collections.Generic.List[string]
+    $selectedUndoFeatureIds = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+    $errors = New-Object System.Collections.Generic.List[string]
+
+    # SelectedUndoFeatures is optional - only process if present
+    if (-not $Backup.PSObject.Properties['SelectedUndoFeatures']) {
+        return [PSCustomObject]@{
+            SelectedUndoFeatures = $selectedUndoFeatures.ToArray()
+            Errors = $errors.ToArray()
+        }
+    }
+
+    $hasInvalidSelectedUndoFeatureId = $false
+    foreach ($featureId in @($Backup.SelectedUndoFeatures)) {
+        if ($featureId -isnot [string] -or [string]::IsNullOrWhiteSpace([string]$featureId)) {
+            $hasInvalidSelectedUndoFeatureId = $true
+            continue
+        }
+
+        $normalizedFeatureId = [string]$featureId
+        if ($selectedUndoFeatureIds.Add($normalizedFeatureId)) {
+            $selectedUndoFeatures.Add($normalizedFeatureId)
+        }
+    }
+
+    if ($hasInvalidSelectedUndoFeatureId) {
+        $errors.Add('SelectedUndoFeatures 必须包含非空字符串的功能 ID。')
+    }
+
+    return [PSCustomObject]@{
+        SelectedUndoFeatures = $selectedUndoFeatures.ToArray()
         Errors = $errors.ToArray()
     }
 }
@@ -50,7 +87,7 @@ function Normalize-RegistryKeySnapshot {
     )
 
     if (-not $Snapshot.PSObject.Properties['Path'] -or [string]::IsNullOrWhiteSpace([string]$Snapshot.Path)) {
-        throw '备份校验失败：注册表项快照缺少 Path。'
+        throw '备份验证失败：注册表键快照缺少 Path。'
     }
 
     $exists = $false
@@ -96,6 +133,9 @@ function Test-RegistryBackupMatchesSelectedFeatures {
         [AllowEmptyCollection()]
         [string[]]$SelectedFeatureIds,
         [Parameter(Mandatory)]
+        [AllowEmptyCollection()]
+        [string[]]$SelectedUndoFeatureIds,
+        [Parameter(Mandatory)]
         [string]$Target,
         [Parameter(Mandatory)]
         [AllowEmptyCollection()]
@@ -105,22 +145,23 @@ function Test-RegistryBackupMatchesSelectedFeatures {
     $errors = New-Object System.Collections.Generic.List[string]
 
     if (-not $script:Features -or $script:Features.Count -eq 0) {
-        $errors.Add('无法校验注册表备份的允许列表，因为功能定义尚未加载。')
+        $errors.Add('无法验证注册表备份允许列表，因为功能定义未加载。')
         return $errors.ToArray()
     }
 
-    $selectedRegistryFeatures = @(Get-SelectedRegistryFeaturesForBackupValidation -SelectedFeatureIds @($SelectedFeatureIds) -Errors $errors)
+    $selectedRegistryFeatures = @(Get-SelectedRegistryFeaturesForBackupValidation -SelectedFeatureIds @($SelectedFeatureIds) -IsUndoFeature:$false -Errors $errors)
+    $undoRegistryFeatures = @(Get-SelectedRegistryFeaturesForBackupValidation -SelectedFeatureIds @($SelectedUndoFeatureIds) -IsUndoFeature:$true -Errors $errors)
     $useSysprepRegFiles = ($Target -eq 'DefaultUserProfile') -or ($Target -like 'User:*')
 
     $capturePlans = @()
-    if ($errors.Count -eq 0 -and $selectedRegistryFeatures.Count -gt 0) {
-        $capturePlans = @(Get-RegistryBackupCapturePlans -SelectedRegistryFeatures @($selectedRegistryFeatures) -UseSysprepRegFiles:$useSysprepRegFiles)
+    if ($errors.Count -eq 0 -and ($selectedRegistryFeatures.Count -gt 0 -or $undoRegistryFeatures.Count -gt 0)) {
+        $capturePlans = @(Get-RegistryBackupCapturePlans -SelectedRegistryFeatures @($selectedRegistryFeatures) -UndoRegistryFeatures @($undoRegistryFeatures) -UseSysprepRegFiles:$useSysprepRegFiles)
     }
 
     $planMap = New-RegistryBackupAllowListPlanMap -CapturePlans @($capturePlans)
 
     if ($planMap.Count -eq 0 -and @($RegistryKeys).Count -gt 0) {
-        $errors.Add('备份包含注册表快照，但未从 SelectedFeatures 推导出任何允许的注册表路径。')
+        $errors.Add('备份包含注册表快照，但未从所选功能中派生出允许的注册表路径。')
     }
 
     foreach ($rootSnapshot in @($RegistryKeys)) {
@@ -136,23 +177,44 @@ function Get-SelectedRegistryFeaturesForBackupValidation {
         [AllowEmptyCollection()]
         [string[]]$SelectedFeatureIds,
         [Parameter(Mandatory)]
+        [bool]$IsUndoFeature,
+        [Parameter(Mandatory)]
         [AllowEmptyCollection()]
         $Errors
     )
 
     if ($null -eq $Errors -or -not ($Errors -is [System.Collections.IList])) {
-        throw 'Get-SelectedRegistryFeaturesForBackupValidation 要求 Errors 为可变列表集合。'
+        throw 'Get-SelectedRegistryFeaturesForBackupValidation requires Errors to be a mutable list collection.'
     }
 
     $selectedRegistryFeatures = New-Object System.Collections.Generic.List[object]
     foreach ($featureId in @($SelectedFeatureIds)) {
         if (-not $script:Features.ContainsKey($featureId)) {
-            $Errors.Add("当前功能目录中未找到所选功能 '$featureId'。")
+            $Errors.Add("在当前功能目录中未找到所选功能 '$featureId'。")
             continue
         }
 
         $feature = $script:Features[$featureId]
-        if ($feature -and -not [string]::IsNullOrWhiteSpace([string]$feature.RegistryKey)) {
+        if (-not $feature) {
+            continue
+        }
+
+        # For undo features, check RegistryUndoKey if present (real features)
+        # Otherwise check RegistryKey (for synthetic features from backup capture)
+        $registryKeyToUse = if ($IsUndoFeature) {
+            $key = [string]$feature.RegistryUndoKey
+            if (-not [string]::IsNullOrWhiteSpace($key)) {
+                $key
+            }
+            else {
+                [string]$feature.RegistryKey
+            }
+        }
+        else {
+            [string]$feature.RegistryKey
+        }
+
+        if (-not [string]::IsNullOrWhiteSpace($registryKeyToUse)) {
             $selectedRegistryFeatures.Add($feature)
         }
     }
@@ -214,13 +276,13 @@ function Test-RegistrySnapshotAgainstAllowList {
     $snapshotPath = [string]$Snapshot.Path
     $normalizedPath = Get-NormalizedRegistryPathKey -Path $snapshotPath
     if ([string]::IsNullOrWhiteSpace($normalizedPath)) {
-        $Errors.Add("备份包含不受支持的注册表路径 '$snapshotPath'。")
+        $Errors.Add("备份中包含不支持的注册表路径 '$snapshotPath'。")
         return
     }
 
     $planMatch = Find-RegistryAllowListPlanMatch -NormalizedPath $normalizedPath -PlanMap $PlanMap
     if ($null -eq $planMatch) {
-        $Errors.Add("备份包含未预期的注册表路径 '$snapshotPath'，该路径不被 SelectedFeatures 允许。")
+        $Errors.Add("备份中包含意外的注册表路径 '$snapshotPath'，该路径未被 SelectedFeatures 允许。")
         return
     }
 
@@ -229,18 +291,18 @@ function Test-RegistrySnapshotAgainstAllowList {
         $valueExists = [bool]$valueSnapshot.Exists
 
         if (-not (Test-RegistryValueAllowedByPlan -PlanMatch $planMatch -ValueName $valueName)) {
-            $Errors.Add("备份在 '$snapshotPath' 下包含未预期的值 '$valueName'。")
+            $Errors.Add("备份中 '$snapshotPath' 下包含意外的值 '$valueName'。")
         }
 
         $kindName = if ($valueSnapshot.PSObject.Properties['Kind']) { [string]$valueSnapshot.Kind } else { '' }
         $valueReference = Get-RegistryValueReferenceForError -SnapshotPath $snapshotPath -ValueName $valueName
         if ($valueExists) {
             if (-not (Test-RegistryValueKindNameSupported -KindName $kindName)) {
-                $Errors.Add("备份在 '$valueReference' 中包含不受支持的注册表值类型 '$kindName'。")
+                $Errors.Add("备份中 '$valueReference' 包含不支持的注册表值类型 '$kindName'。")
             }
         }
         elseif (-not [string]::IsNullOrWhiteSpace($kindName)) {
-            $Errors.Add("当 Exists 为 false 时，备份值 '$valueReference' 不得定义 Kind。")
+            $Errors.Add("备份值 '$valueReference' 在 Exists 为 false 时不得定义 Kind。")
         }
     }
 
@@ -323,7 +385,7 @@ function Find-RegistryAllowListPlanMatch {
             continue
         }
 
-        $subKeyPrefix = "$($plan.NormalizedPath)\\"
+        $subKeyPrefix = "$($plan.NormalizedPath)\"
         if ($NormalizedPath.StartsWith($subKeyPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
             return [PSCustomObject]@{
                 IsDescendant = $true

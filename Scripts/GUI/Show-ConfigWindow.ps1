@@ -4,10 +4,10 @@
         [bool]$UsesDarkMode,
         [string]$Title,
         [string]$Prompt,
-        [string[]]$Categories = @('应用', '系统调整', '部署设置'),
+        [string[]]$Categories = @('应用程序', '系统调整', '部署设置'),
         [string[]]$DisabledCategories = @(),
         [hashtable]$CategoryDetails = @(),
-        [string]$ActionLabel = '确定'
+        [string]$ActionLabel = 'OK'
     )
 
     # Show overlay on owner window
@@ -21,13 +21,14 @@
                 $Owner.Dispatcher.Invoke([action]{ $overlay.Visibility = 'Visible' })
             }
         }
-    } catch { }
+    } 
+    catch { }
 
     # Load XAML from schema file
     $schemaPath = $script:ImportExportConfigSchema
 
     if (-not $schemaPath -or -not (Test-Path $schemaPath)) {
-        Show-MessageBox -Message '未找到导入/导出窗口的架构文件。' -Title '错误' -Button 'OK' -Icon 'Error' -Owner $Owner | Out-Null
+        Show-MessageBox -Message '找不到导入/导出窗口架构文件。' -Title '错误' -Button 'OK' -Icon 'Error' -Owner $Owner | Out-Null
         if ($overlay -and -not $overlayWasAlreadyVisible) {
             try { $Owner.Dispatcher.Invoke([action]{ $overlay.Visibility = 'Collapsed' }) } catch { }
         }
@@ -52,7 +53,8 @@
         if ($mainCheckBoxStyle) {
             $dlg.Resources.Add([type][System.Windows.Controls.CheckBox], $mainCheckBoxStyle)
         }
-    } catch { }
+    }
+    catch { }
 
     # Populate named elements
     $dlg.Title = $Title
@@ -78,7 +80,7 @@
         $cb.Margin = [System.Windows.Thickness]::new(0,0,0,4)
         $cb.FontSize = 14
         $cb.FontWeight = [System.Windows.FontWeights]::Medium
-        $cb.Foreground = $dlg.FindResource('FgColor')
+        $cb.Foreground = $dlg.FindResource("AppFgColor")
         if ($DisabledCategories -contains $cat) {
             $cb.IsChecked = $false
             $cb.IsEnabled = $false
@@ -93,9 +95,9 @@
             $detailsText = New-Object System.Windows.Controls.TextBlock
             $detailsText.Text = $CategoryDetails[$cat]
             $detailsText.FontSize = 12
-            $detailsText.Foreground = $dlg.FindResource('FgColor')
-            $detailsText.Margin = [System.Windows.Thickness]::new(30,0,0,0)
-            $detailsText.Opacity = 0.75
+            $detailsText.Foreground = $dlg.FindResource("AppFgColor")
+            $detailsText.Margin = [System.Windows.Thickness]::new(32,0,0,0)
+            $detailsText.Opacity = if ($DisabledCategories -contains $cat) { 0.45 } else { 0.75 }
             $detailsText.TextWrapping = [System.Windows.TextWrapping]::Wrap
             $container.Children.Add($detailsText) | Out-Null
         }
@@ -227,7 +229,7 @@ function Get-AvailableImportExportCategories {
     )
 
     $availableCategories = @()
-    if ($Config.Apps) { $availableCategories += '应用' }
+    if ($Config.Apps) { $availableCategories += '应用程序' }
     if ($Config.Tweaks) { $availableCategories += '系统调整' }
     if ($Config.Deployment) { $availableCategories += '部署设置' }
 
@@ -258,9 +260,9 @@ function Get-DeploymentCategoryDetailString {
 
     if ($lookup.ContainsKey('AppRemovalScopeIndex')) {
         switch ([int]$lookup['AppRemovalScopeIndex']) {
-            0 { $line1 += '应用卸载：所有用户' }
-            1 { $line1 += '应用卸载：当前用户' }
-            2 { $line1 += "应用卸载：$(if ($lookup['OtherUsername']) { $lookup['OtherUsername'] } else { '其他用户' })" }
+            0 { $line1 += '应用移除：所有用户' }
+            1 { $line1 += '应用移除：当前用户' }
+            2 { $line1 += "应用移除：$(if ($lookup['OtherUsername']) { $lookup['OtherUsername'] } else { '其他用户' })" }
         }
     }
 
@@ -269,7 +271,7 @@ function Get-DeploymentCategoryDetailString {
     if ($lookup.ContainsKey('RestartExplorer')    -and [bool]$lookup['RestartExplorer'])    { $options += '重启资源管理器' }
 
     $lines = @()
-    if ($line1.Count -gt 0)   { $lines += $line1 -join '，' }
+    if ($line1.Count -gt 0)   { $lines += $line1 -join ', ' }
     if ($options.Count -gt 0) { $lines += "选项：$($options -join '，')" }
 
     if ($lines.Count -gt 0) { return $lines -join "`n" }
@@ -286,11 +288,17 @@ function Build-CategoryDetails {
     $details = @{}
 
     if ($AppCount -gt 0) {
-        $details['应用'] = "$AppCount 个应用"
+        $details['应用程序'] = "已选择 $AppCount 个应用程序"
+    }
+    else {
+        $details['应用程序'] = '未选择应用程序'
     }
 
     if ($TweakCount -gt 0) {
-        $details['系统调整'] = "$TweakCount 项调整"
+        $details['系统调整'] = "已选择 $TweakCount 项调整"
+    }
+    else {
+        $details['系统调整'] = '未选择调整'
     }
 
     if ($DeploymentSettings) {
@@ -375,13 +383,13 @@ function Export-Configuration {
     $tweakSettings = Get-SelectedTweakSettings -Owner $Owner -UiControlMappings $UiControlMappings
 
     $disabledCategories = @()
-    if ($selectedApps.Count -eq 0) { $disabledCategories += '应用' }
+    if ($selectedApps.Count -eq 0) { $disabledCategories += '应用程序' }
     if ($tweakSettings.Count -eq 0) { $disabledCategories += '系统调整' }
 
     $deploymentSettings = Get-DeploymentSettings -Owner $Owner -UserSelectionCombo $UserSelectionCombo -OtherUsernameTextBox $OtherUsernameTextBox
     $categoryDetails = Build-CategoryDetails -AppCount $selectedApps.Count -TweakCount $tweakSettings.Count -DeploymentSettings $deploymentSettings
 
-    $categories = Show-ImportExportConfigWindow -Owner $Owner -UsesDarkMode $UsesDarkMode -Title '导出配置' -Prompt '选择要包含在导出文件中的设置。' -DisabledCategories $disabledCategories -CategoryDetails $categoryDetails -ActionLabel '导出设置'
+    $categories = Show-ImportExportConfigWindow -Owner $Owner -UsesDarkMode $UsesDarkMode -Title '导出配置' -Prompt '基于当前已选设置创建配置文件。您可以选择要包含在导出中的设置类别。' -DisabledCategories $disabledCategories -CategoryDetails $categoryDetails -ActionLabel '导出设置'
     if (-not $categories) {
         Write-Host '导出已取消。'
         return
@@ -389,7 +397,7 @@ function Export-Configuration {
 
     $config = @{ Version = '1.0' }
 
-    if ($categories -contains '应用') {
+    if ($categories -contains '应用程序') {
         $config['Apps'] = @($selectedApps)
     }
     if ($categories -contains '系统调整') {
@@ -402,7 +410,7 @@ function Export-Configuration {
     # Show native save-file dialog
     $saveDialog = New-Object Microsoft.Win32.SaveFileDialog
     $saveDialog.Title = '导出配置'
-    $saveDialog.Filter = 'JSON 文件 (*.json)|*.json|所有文件 (*.*)|*.*'
+    $saveDialog.Filter = 'JSON files (*.json)|*.json|All files (*.*)|*.*'
     $saveDialog.DefaultExt = '.json'
     $saveDialog.FileName = "Win11Debloat-Config-$(Get-Date -Format 'yyyyMMdd').json"
 
@@ -411,11 +419,17 @@ function Export-Configuration {
         return
     }
 
-    Write-Host "正在导出配置到 '$($saveDialog.FileName)'... (类别: $($categories -join '，'))"
+    Write-Host "正在导出配置到 '$($saveDialog.FileName)'...（类别：$($categories -join '，')）"
+
+    if ($script:Params.ContainsKey("WhatIf")) {
+        Write-Host "[WhatIf] Export configuration to '$($saveDialog.FileName)'" -ForegroundColor Cyan
+        Show-MessageBox -Message "[WhatIf] 配置将被导出到此文件（未写入文件）。" -Title '导出配置' -Button 'OK' -Icon 'Information' | Out-Null
+        return
+    }
 
     if (SaveToFile -Config $config -FilePath $saveDialog.FileName) {
-        Write-Host "配置已成功导出：$($saveDialog.FileName)"
-        Show-MessageBox -Message "配置已成功导出。" -Title '导出配置' -Button 'OK' -Icon 'Information' | Out-Null
+        Write-Host "配置导出成功：$($saveDialog.FileName)"
+        Show-MessageBox -Message "配置导出成功。" -Title '导出配置' -Button 'OK' -Icon 'Information' | Out-Null
     }
     else {
         Write-Error "导出配置到 '$($saveDialog.FileName)' 失败"
@@ -438,7 +452,7 @@ function Import-Configuration {
     # Show native open-file dialog
     $openDialog = New-Object Microsoft.Win32.OpenFileDialog
     $openDialog.Title = '选择配置文件'
-    $openDialog.Filter = 'JSON 文件 (*.json)|*.json|所有文件 (*.*)|*.*'
+    $openDialog.Filter = 'JSON files (*.json)|*.json|All files (*.*)|*.*'
     $openDialog.DefaultExt = '.json'
 
     if ($openDialog.ShowDialog($Owner) -ne $true) {
@@ -451,13 +465,13 @@ function Import-Configuration {
     $config = LoadJsonFile -filePath $openDialog.FileName -expectedVersion '1.0'
     if (-not $config) {
         Write-Error "读取配置文件 '$($openDialog.FileName)' 失败"
-        Show-MessageBox -Message "读取配置文件失败" -Title '无效的配置' -Button 'OK' -Icon 'Error' | Out-Null
+        Show-MessageBox -Message "读取配置文件失败" -Title '无效配置' -Button 'OK' -Icon 'Error' | Out-Null
         return
     }
 
     if (-not $config.Version) {
         Write-Error "配置文件格式无效：'$($openDialog.FileName)'"
-        Show-MessageBox -Message "配置文件格式无效。" -Title '无效的配置' -Button 'OK' -Icon 'Error' | Out-Null
+        Show-MessageBox -Message "配置文件格式无效。" -Title '无效配置' -Button 'OK' -Icon 'Error' | Out-Null
         return
     }
 
@@ -465,34 +479,34 @@ function Import-Configuration {
 
     if ($availableCategories.Count -eq 0) {
         Write-Warning "配置文件 '$($openDialog.FileName)' 不包含可导入的数据。"
-        Show-MessageBox -Message "所选文件不包含可导入的数据。" -Title '无效的配置' -Button 'OK' -Icon 'Error' | Out-Null
+        Show-MessageBox -Message "所选文件不包含可导入的数据。" -Title '无效配置' -Button 'OK' -Icon 'Error' | Out-Null
         return
     }
 
-    Write-Host "配置中可用的类别：$($availableCategories -join '，')"
+    Write-Host "配置中的可用类别：$($availableCategories -join '，')"
 
     $appCount = @($config.Apps | Where-Object { $_ -is [string] -and -not [string]::IsNullOrWhiteSpace($_) }).Count
     $tweakCount = @($config.Tweaks | Where-Object { $_ -and $_.Name -and $_.Value -eq $true }).Count
     $categoryDetails = Build-CategoryDetails -AppCount $appCount -TweakCount $tweakCount -DeploymentSettings @($config.Deployment)
 
-    $categories = Show-ImportExportConfigWindow -Owner $Owner -UsesDarkMode $UsesDarkMode -Title '导入配置' -Prompt '选择要导入的设置。导入后可在应用前进行查看和修改。' -Categories $availableCategories -CategoryDetails $categoryDetails -ActionLabel '导入设置'
+    $categories = Show-ImportExportConfigWindow -Owner $Owner -UsesDarkMode $UsesDarkMode -Title '导入配置' -Prompt '选择要导入的设置类别。您可以在应用前查看和修改导入的设置。' -Categories $availableCategories -CategoryDetails $categoryDetails -ActionLabel '导入设置'
     if (-not $categories) {
         Write-Host '导入已取消。'
         return
     }
 
-    if ($categories -contains '应用' -and $config.Apps) {
+    if ($categories -contains '应用程序' -and $config.Apps) {
         $appIds = @(
-            $config.Apps |
-            Where-Object { $_ -is [string] } |
+            $config.Apps | 
+            Where-Object { $_ -is [string] } | 
             ForEach-Object { $_.Trim() } |
             Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
         )
 
-        Write-Host "正在导入 $($appIds.Count) 个应用选择项。"
+        Write-Host "正在导入 $($appIds.Count) 个应用选择。"
         Apply-ImportedApplications -AppsPanel $AppsPanel -AppIds $appIds
-
-        if ($OnAppsImported) {
+        
+        if ($OnAppsImported) { 
             & $OnAppsImported
         }
     }
@@ -506,8 +520,8 @@ function Import-Configuration {
         Apply-ImportedDeploymentSettings -Owner $Owner -UserSelectionCombo $UserSelectionCombo -OtherUsernameTextBox $OtherUsernameTextBox -DeploymentSettings @($config.Deployment)
     }
 
-    Write-Host '配置已成功导入。'
-    Show-MessageBox -Message "配置已成功导入。" -Title '导入配置' -Button 'OK' -Icon 'Information' | Out-Null
+    Write-Host '配置导入成功。'
+    Show-MessageBox -Message "配置导入成功。" -Title '导入配置' -Button 'OK' -Icon 'Information' | Out-Null
 
     if ($OnImportCompleted) {
         & $OnImportCompleted $categories

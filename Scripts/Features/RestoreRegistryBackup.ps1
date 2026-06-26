@@ -12,7 +12,7 @@
         $rawBackup = Get-Content -LiteralPath $FilePath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
     }
     catch {
-        throw "读取备份文件 '$FilePath' 失败。该文件不是有效的 JSON。"
+        throw "无法读取备份文件 '$FilePath'。该文件不是有效的 JSON。"
     }
 
     return Normalize-RegistryBackup -Backup $rawBackup
@@ -37,7 +37,7 @@ function Normalize-RegistryBackup {
         $errors.Add('缺少属性：BackupType')
     }
     elseif ([string]$Backup.BackupType -ne 'RegistryState') {
-        $errors.Add("不支持的 BackupType '$($Backup.BackupType)'。")
+        $errors.Add("不支持的备份类型 '$($Backup.BackupType)'。")
     }
 
     $normalizedTarget = ''
@@ -64,7 +64,7 @@ function Normalize-RegistryBackup {
             }
         }
         else {
-            $errors.Add("不支持的 Target '$normalizedTarget'。")
+            $errors.Add("不支持的目标 '$normalizedTarget'。")
         }
     }
 
@@ -87,18 +87,28 @@ function Normalize-RegistryBackup {
         $errors.Add([string]$selectedFeatureParseError)
     }
 
-    $allowListValidationErrors = @(Test-RegistryBackupMatchesSelectedFeatures -SelectedFeatureIds @($selectedFeatures) -Target $normalizedTarget -RegistryKeys @($normalizedKeys))
+    $selectedUndoFeatureParseResult = Get-NormalizedSelectedUndoFeatureIdsFromBackup -Backup $Backup
+    $selectedUndoFeatures = @($selectedUndoFeatureParseResult.SelectedUndoFeatures)
+    foreach ($selectedUndoFeatureParseError in @($selectedUndoFeatureParseResult.Errors)) {
+        $errors.Add([string]$selectedUndoFeatureParseError)
+    }
+
+    $allSelectedFeatures = @($selectedFeatures) + @($selectedUndoFeatures)
+    if ($allSelectedFeatures.Count -eq 0) {
+        $errors.Add('备份必须在 SelectedFeatures 或 SelectedUndoFeatures 中包含至少一个功能 ID。')
+    }
+    $allowListValidationErrors = @(Test-RegistryBackupMatchesSelectedFeatures -SelectedFeatureIds @($selectedFeatures) -SelectedUndoFeatureIds @($selectedUndoFeatures) -Target $normalizedTarget -RegistryKeys @($normalizedKeys))
     foreach ($allowListValidationError in $allowListValidationErrors) {
         $errors.Add([string]$allowListValidationError)
     }
 
     if ($errors.Count -gt 0) {
-        Write-Error "备份校验失败：$($errors -join ' ')"
+        Write-Error "备份验证失败：$($errors -join ' ')"
         if ($errors.Count -eq 1) {
-            throw ("校验失败：$($errors[0])")
+            throw ("验证失败：$($errors[0])")
         }
         else {
-            throw ("校验失败，共 $($errors.Count) 个错误。请查看控制台输出获取详情。")
+            throw ("验证失败，共 $($errors.Count) 个错误。详情请参见控制台输出。")
         }
     }
 
@@ -110,6 +120,7 @@ function Normalize-RegistryBackup {
         ComputerName = [string]$Backup.ComputerName
         Target = $normalizedTarget
         SelectedFeatures = @($selectedFeatures)
+        SelectedUndoFeatures = @($selectedUndoFeatures)
         RegistryKeys = @($normalizedKeys)
     }
 }
@@ -122,24 +133,30 @@ function Restore-RegistryBackupState {
 
     $friendlyTarget = GetFriendlyRegistryBackupTarget -Target ([string]$Backup.Target)
 
+    if ($script:Params.ContainsKey("WhatIf")) {
+        Write-Host "[WhatIf] 恢复 $friendlyTarget 的注册表备份" -ForegroundColor Cyan
+        return [PSCustomObject]@{ Result = $true }
+    }
+
     $restoreAction = {
         param($normalizedBackup)
 
-        Write-Host "正在从 $(@($normalizedBackup.RegistryKeys).Count) 个根快照应用注册表还原。"
+        Write-Host "正在从 $(@($normalizedBackup.RegistryKeys).Count) 个根快照应用注册表恢复。"
         foreach ($rootSnapshot in @($normalizedBackup.RegistryKeys)) {
             Restore-RegistryKeySnapshot -Snapshot $rootSnapshot
         }
     }
 
-    Write-Host "正在为 $friendlyTarget 开始还原。"
+    Write-Host "正在开始恢复 $friendlyTarget。"
 
     if ($Backup.Target -eq 'DefaultUserProfile' -or $Backup.Target -like 'User:*') {
-        Write-Host "还原需要加载目标用户配置单元。"
+        Write-Host "恢复需要加载目标用户配置单元。"
         Invoke-WithLoadedRestoreHive -Target $Backup.Target -ScriptBlock $restoreAction -ArgumentObject $Backup
-        Write-Host "$friendlyTarget 还原已完成。"
-        return
+        Write-Host "$friendlyTarget 的恢复已完成。"
+        return [PSCustomObject]@{ Result = $true }
     }
 
     & $restoreAction $Backup
-    Write-Host "$friendlyTarget 还原已完成。"
+    Write-Host "Restore completed for $friendlyTarget."
+    return [PSCustomObject]@{ Result = $true }
 }
