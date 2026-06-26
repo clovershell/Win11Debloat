@@ -99,6 +99,10 @@
     [switch]$HideDriveLetters
 )
 
+# Fix console encoding for Chinese characters
+[Console]::OutputEncoding = [Text.Encoding]::UTF8
+$OutputEncoding = [Text.Encoding]::UTF8
+
 # Show error if current powershell environment does not have LanguageMode set to FullLanguage
 if ($ExecutionContext.SessionState.LanguageMode -ne "FullLanguage") {
    Write-Host "错误：Win11Debloat 无法在您的系统上运行。PowerShell 执行受到安全策略限制" -ForegroundColor Red
