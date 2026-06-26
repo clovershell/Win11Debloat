@@ -102,6 +102,8 @@
 # Fix console encoding for Chinese characters
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
 $OutputEncoding = [Text.Encoding]::UTF8
+Clear-Host
+Start-Sleep -Milliseconds 50
 
 # Show error if current powershell environment does not have LanguageMode set to FullLanguage
 if ($ExecutionContext.SessionState.LanguageMode -ne "FullLanguage") {
@@ -111,8 +113,6 @@ if ($ExecutionContext.SessionState.LanguageMode -ne "FullLanguage") {
    Read-Host | Out-Null
    Exit
 }
-
-Clear-Host
 Write-Output "-------------------------------------------------------------------------------------------"
 Write-Output " Win11Debloat 中文版 - Get"
 Write-Output "-------------------------------------------------------------------------------------------"
