@@ -1,7 +1,9 @@
-﻿param (
+param (
+    [switch]$Verbose,
+    [switch]$WhatIf,
+    [switch]$Dev,
     [switch]$CLI,
     [switch]$Silent,
-    [switch]$Verbose,
     [switch]$Sysprep,
     [string]$LogPath,
     [string]$User,
@@ -26,6 +28,7 @@
     [switch]$DisableFastStartup,
     [switch]$DisableBitlockerAutoEncryption,
     [switch]$DisableModernStandbyNetworking,
+    [switch]$DisableNotifications,
     [switch]$DisableStorageSense,
     [switch]$DisableUpdateASAP,
     [switch]$PreventUpdateAutoReboot,
@@ -119,10 +122,14 @@ $tempArchivePath = Join-Path $tempRootPath 'win11debloat.zip'
 
 Write-Output "> 正在下载 Win11Debloat..."
 
-# Download latest version of Win11Debloat from GitHub as zip archive
+# Download Win11Debloat from GitHub as a zip archive.
 try {
-    $LatestReleaseUri = (Invoke-RestMethod https://api.github.com/repos/Raphire/Win11Debloat/releases/latest).zipball_url
-    Invoke-RestMethod $LatestReleaseUri -OutFile $tempArchivePath
+    if ($Dev) {
+        $sourceUri = "https://github.com/Raphire/Win11Debloat/archive/refs/heads/master.zip"
+    } else {
+        $sourceUri = (Invoke-RestMethod https://api.github.com/repos/Raphire/Win11Debloat/releases/latest).zipball_url
+    }
+    Invoke-RestMethod $sourceUri -OutFile $tempArchivePath
 }
 catch {
     Write-Host "错误：无法从 GitHub 获取最新版本。请检查您的网络连接后重试。" -ForegroundColor Red
@@ -184,8 +191,8 @@ if (Test-Path "$backupDir") {
     Remove-Item "$backupDir" -Recurse -Force
 }
 
-# Make list of arguments to pass on to the script
-$arguments = $($PSBoundParameters.GetEnumerator() | ForEach-Object {
+# Make list of arguments to pass on to the script (exclude the -Dev switch, which only affects this launcher)
+$arguments = $($PSBoundParameters.GetEnumerator() | Where-Object { $_.Key -ne 'Dev' } | ForEach-Object {
     if ($_.Value -eq $true) {
         "-$($_.Key)"
     } 

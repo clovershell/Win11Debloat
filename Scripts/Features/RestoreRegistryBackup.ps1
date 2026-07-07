@@ -1,4 +1,20 @@
-﻿function Load-RegistryBackupFromFile {
+<#
+    .SYNOPSIS
+        Loads a registry backup from a JSON file and normalizes its contents.
+
+    .DESCRIPTION
+        Loads a registry backup from disk and returns a normalized representation
+        of its contents suitable for use by the restore workflow. Throws if the
+        file is missing, unreadable, or not valid JSON.
+
+    .PARAMETER FilePath
+        The absolute path to the registry backup JSON file to load.
+
+    .OUTPUTS
+        PSCustomObject
+        A normalized registry backup object produced by Normalize-RegistryBackup.
+#>
+function Load-RegistryBackupFromFile {
     param(
         [Parameter(Mandatory)]
         [string]$FilePath
@@ -18,6 +34,24 @@
     return Normalize-RegistryBackup -Backup $rawBackup
 }
 
+<#
+    .SYNOPSIS
+        Validates and normalizes a raw registry backup object.
+
+    .DESCRIPTION
+        Validates the structure and content of the supplied backup and converts
+        it into a normalized representation that can be safely consumed by the
+        restore workflow. Throws if validation fails.
+
+    .PARAMETER Backup
+        The raw backup object (typically parsed from JSON) to normalize.
+
+    .OUTPUTS
+        PSCustomObject
+        A normalized backup with Version, BackupType, CreatedAt, CreatedBy,
+        ComputerName, Target, SelectedFeatures, SelectedUndoFeatures, and
+        RegistryKeys properties.
+#>
 function Normalize-RegistryBackup {
     param(
         [Parameter(Mandatory)]
@@ -97,9 +131,16 @@ function Normalize-RegistryBackup {
     if ($allSelectedFeatures.Count -eq 0) {
         $errors.Add('备份必须在 SelectedFeatures 或 SelectedUndoFeatures 中包含至少一个功能 ID。')
     }
-    $allowListValidationErrors = @(Test-RegistryBackupMatchesSelectedFeatures -SelectedFeatureIds @($selectedFeatures) -SelectedUndoFeatureIds @($selectedUndoFeatures) -Target $normalizedTarget -RegistryKeys @($normalizedKeys))
-    foreach ($allowListValidationError in $allowListValidationErrors) {
-        $errors.Add([string]$allowListValidationError)
+    else {
+        try {
+            $allowListValidationErrors = @(Test-RegistryBackupMatchesSelectedFeatures -SelectedFeatureIds @($selectedFeatures) -SelectedUndoFeatureIds @($selectedUndoFeatures) -Target $normalizedTarget -RegistryKeys @($normalizedKeys))
+            foreach ($allowListValidationError in $allowListValidationErrors) {
+                $errors.Add([string]$allowListValidationError)
+            }
+        }
+        catch {
+            $errors.Add("Failed to validate backup: $($_.Exception.Message)")
+        }
     }
 
     if ($errors.Count -gt 0) {
@@ -125,6 +166,23 @@ function Normalize-RegistryBackup {
     }
 }
 
+<#
+    .SYNOPSIS
+        Restores registry state from a normalized backup object.
+
+    .DESCRIPTION
+        Applies the registry state described by the supplied backup back to the
+        registry, loading the appropriate user hive when required.
+
+    .PARAMETER Backup
+        A normalized backup object (as produced by Normalize-RegistryBackup) whose
+        RegistryKeys snapshots should be restored.
+
+    .OUTPUTS
+        PSCustomObject
+        Returns an object with a Result property set to $true when the restore
+        completes successfully.
+#>
 function Restore-RegistryBackupState {
     param(
         [Parameter(Mandatory)]

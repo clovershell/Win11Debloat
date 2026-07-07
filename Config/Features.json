@@ -402,6 +402,19 @@
       "MaxVersion": null
     },
     {
+      "FeatureId": "DisableNotifications",
+      "Label": "禁用 Windows 通知（来自应用和其他发送者）",
+      "ToolTip": "禁用来自应用和其他发送者的 Windows 原生通知，包括 Discord、WhatsApp、Teams 和 Slack 等应用的通知。",
+      "Category": "Privacy & Suggested Content",
+      "RegistryKey": "Disable_Notifications.reg",
+      "ApplyText": "正在禁用 Windows 通知和提醒",
+      "UndoLabel": "启用 Windows 通知和提醒",
+      "ApplyUndoText": "正在启用 Windows 通知和提醒",
+      "RegistryUndoKey": "Enable_Notifications.reg",
+      "MinVersion": null,
+      "MaxVersion": null
+    },
+    {
       "FeatureId": "DisableLocationServices",
       "Label": "禁用 Windows 定位服务和应用位置访问",
       "ToolTip": "这将关闭 Windows 定位服务并拒绝应用访问您的位置。此功能使用策略，将锁定某些设置。",
