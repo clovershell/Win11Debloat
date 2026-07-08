@@ -64,9 +64,9 @@ function Show-AboutDialog {
         Start-Process "https://github.com/Raphire/Win11Debloat"
     })
     
-    # Ko-fi link click handler
+    # 爱发电链接点击处理
     $kofiLink.Add_MouseLeftButtonDown({
-        Start-Process "https://ko-fi.com/raphire"
+        Start-Process "https://afdian.com/a/qingxwa"
     })
     
     # Close button handler

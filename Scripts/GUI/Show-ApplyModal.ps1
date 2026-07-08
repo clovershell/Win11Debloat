@@ -211,9 +211,9 @@
 
     $applyKofiBtn.Add_Click({
         if ($script:ApplyModalInErrorState) {
-            Start-Process "https://github.com/Raphire/Win11Debloat/issues/new"
+            Start-Process "https://github.com/scavin/Win11Debloat/issues/new"
         } else {
-            Start-Process "https://ko-fi.com/raphire"
+            Start-Process "https://afdian.com/a/qingxwa"
         }
     })
 

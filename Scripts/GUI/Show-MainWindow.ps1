@@ -75,8 +75,8 @@
         }
     })
 
-    # ---- Menu/button event wiring ----
-    $kofiBtn.Add_Click({ Start-Process "https://ko-fi.com/raphire" })
+    # ---- 菜单/按钮事件绑定 ----
+    $kofiBtn.Add_Click({ Start-Process "https://afdian.com/a/qingxwa" })
 
     $menuBtn.Add_Click({
         $menuBtn.ContextMenu.PlacementTarget = $menuBtn
